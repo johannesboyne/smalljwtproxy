@@ -10,6 +10,11 @@ A very simpel JWT token validator proxy.
 JWT_SECRET=youverysecretsecret jwtproxy 5000:3000 5001:3001
 ```
 
+#Noticeable JWT proxies
+
+- https://github.com/coreos/jwtproxy
+- https://github.com/auth0/nginx-jwt
+
 #License
 
 MIT
