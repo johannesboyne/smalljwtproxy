@@ -72,13 +72,16 @@ type Reverser struct {
 // Initiate
 func main() {
 	// parse ports from cmdline
-	for _, a := range os.Args[1:] {
+	for _, a := range os.Args[1 : len(os.Args)-1] {
 		ports := strings.Split(a, ":")
 		log.Println("ports:", ports)
 		rev := NewReverser("http://0.0.0.0:", ports[1])
 		go http.ListenAndServe(":"+ports[0], rev.Host)
 	}
-	for {
-		// keep the server running
-	}
+
+	a := os.Args[len(os.Args)-1]
+	ports := strings.Split(a, ":")
+	log.Println("ports:", ports)
+	rev := NewReverser("http://0.0.0.0:", ports[1])
+	http.ListenAndServe(":"+ports[0], rev.Host)
 }
