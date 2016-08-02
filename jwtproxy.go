@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 
 	jwt "github.com/dgrijalva/jwt-go"
@@ -16,9 +17,17 @@ import (
 func sameHostSameHeaders(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for h := range r.Header {
+			r.Header.Set(h, r.Header.Get(h))
+		}
+		for h := range w.Header() {
 			w.Header().Set(h, r.Header.Get(h))
 		}
+
 		r.Host = r.URL.Host
+
+		for a := range r.Header {
+			log.Println(a)
+		}
 		handler.ServeHTTP(w, r)
 	})
 }
@@ -28,7 +37,7 @@ func validateJWT(handler http.Handler) http.Handler {
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 		if err != nil || len(authHeader) <= 1 {
-			w.Write([]byte("UNAUTHORIZED"))
+			w.WriteHeader(401)
 			return
 		}
 		tokenString = authHeader[1]
@@ -40,9 +49,17 @@ func validateJWT(handler http.Handler) http.Handler {
 		})
 		if err != nil {
 			log.Println(err)
-			w.Write([]byte("UNAUTHORIZED"))
+			w.WriteHeader(401)
 		} else {
-			log.Println("access", token)
+
+			v := reflect.ValueOf(token.Claims)
+			i := v.Interface()
+			a := i.(jwt.MapClaims)
+
+			for h, m := range a {
+				r.Header.Set("X-Croove-Session-"+h, fmt.Sprintf("%v", m))
+			}
+
 			handler.ServeHTTP(w, r)
 		}
 	})
@@ -54,10 +71,11 @@ func NewReverser(host string, port string) *Reverser {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	// initialize our reverse proxy
 	reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
 	// wrap that proxy with our sameHostSameHeaders function
-	singleHosted := sameHostSameHeaders(validateJWT(reverseProxy))
+	singleHosted := validateJWT(sameHostSameHeaders(reverseProxy))
 
 	rev := Reverser{reverseProxy, singleHosted}
 	return &rev
