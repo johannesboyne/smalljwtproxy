@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,7 +37,7 @@ func TestJWTServer(t *testing.T) {
 	ss, err := token.SignedString(mySigningKey)
 
 	if err != nil {
-		log.Println("ERRO:", err)
+		panic(err)
 	}
 
 	// Test server that always responds with 200 code, and specific payload
@@ -54,7 +53,6 @@ func TestJWTServer(t *testing.T) {
 	defer reverser.Close()
 
 	client := &http.Client{}
-	log.Println("REVERSER URL", reverser.URL)
 	req, err := http.NewRequest("GET", reverser.URL, nil)
 
 	req.Header.Add("Authorization", `Bearer `+ss)

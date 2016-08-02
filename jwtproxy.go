@@ -12,6 +12,7 @@ import (
 
 	jwt "github.com/dgrijalva/jwt-go"
 	jwtr "github.com/dgrijalva/jwt-go/request"
+	"github.com/julienschmidt/httprouter"
 )
 
 func sameHostSameHeaders(handler http.Handler) http.Handler {
@@ -25,18 +26,17 @@ func sameHostSameHeaders(handler http.Handler) http.Handler {
 
 		r.Host = r.URL.Host
 
-		for a := range r.Header {
-			log.Println(a)
-		}
 		handler.ServeHTTP(w, r)
 	})
 }
 
 func validateJWT(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println(r.URL)
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 		if err != nil || len(authHeader) <= 1 {
+			log.Printf("ACCESS DENIED: No Authorization Bearer, %v\n", err)
 			w.WriteHeader(401)
 			return
 		}
@@ -48,7 +48,7 @@ func validateJWT(handler http.Handler) http.Handler {
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
 		if err != nil {
-			log.Println(err)
+			log.Printf("ACCESS DENIED: Error %v\n", err)
 			w.WriteHeader(401)
 		} else {
 
@@ -65,6 +65,15 @@ func validateJWT(handler http.Handler) http.Handler {
 	})
 }
 
+func mapper(handler http.Handler) http.Handler {
+	router := httprouter.New()
+	// @TODO read this from the configuration file
+	router.GET("/", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		handler.ServeHTTP(w, r)
+	})
+	return router
+}
+
 // NewReverser creates a new reverser type
 func NewReverser(host string, port string) *Reverser {
 	rpURL, err := url.Parse(host + port)
@@ -75,7 +84,7 @@ func NewReverser(host string, port string) *Reverser {
 	// initialize our reverse proxy
 	reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
 	// wrap that proxy with our sameHostSameHeaders function
-	singleHosted := validateJWT(sameHostSameHeaders(reverseProxy))
+	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy)))
 
 	rev := Reverser{reverseProxy, singleHosted}
 	return &rev

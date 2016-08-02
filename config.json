@@ -1,0 +1,19 @@
+{
+  "0.0.0.0:5000:0.0.0.0:3000": {
+    "/cars/*path": {
+      "open": {
+        "method": ["GET"]
+      },
+      "allow": {
+        "method": ["POST", "PUT", "DELETE"],
+        "role": ["customer", "admin", "support"]
+      }
+    },
+    "/users/:user": {
+      "allow": {
+        "method": ["GET", "POST", "PUT", "DELETE"],
+        "role": ["customer", "admin", "support"]
+      }
+    }
+  }
+}
