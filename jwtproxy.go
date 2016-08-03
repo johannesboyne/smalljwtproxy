@@ -231,8 +231,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//m := new(Dispatch)
-	//var m interface{}
 	err = json.Unmarshal(file, &proxyConfig)
 	if err != nil {
 		log.Fatal(err)
@@ -247,5 +245,6 @@ func main() {
 	to := strings.Split(proxy.Connect.To, ":")
 	from := strings.Split(proxy.Connect.From, ":")
 	rev := NewReverser("http://"+to[0]+":", to[1])
-	http.ListenAndServe(":"+from[1], rev.Host)
+	log.Println("Initialized and proxy started on:", from[1])
+	log.Fatal(http.ListenAndServe(":"+from[1], rev.Host))
 }
