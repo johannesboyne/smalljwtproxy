@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -14,6 +16,38 @@ import (
 	jwtr "github.com/dgrijalva/jwt-go/request"
 	"github.com/julienschmidt/httprouter"
 )
+
+// JWTConfig The configuration struct
+type JWTConfig struct {
+	Proxies []struct {
+		Connect FromTo          `json:"connect"`
+		Routes  []AccessControl `json:"routes"`
+	} `json:"proxies"`
+	Collection map[string]AccessControl
+}
+
+// FromTo definition
+type FromTo struct {
+	From string
+	To   string
+}
+
+// AccessControl defines allow / deny and open pathes
+type AccessControl struct {
+	Route string           `json:"route"`
+	Open  AccessDefinition `json:"open"`
+	Allow AccessDefinition `json:"allow"`
+	Deny  AccessDefinition `json:"deny"`
+}
+
+// AccessDefinition access definitions
+type AccessDefinition struct {
+	Method []string `json:"method"`
+	Claims []struct {
+		Key   string
+		Value []string
+	} `json:"claims"`
+}
 
 func sameHostSameHeaders(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +66,13 @@ func sameHostSameHeaders(handler http.Handler) http.Handler {
 
 func validateJWT(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Println(r.URL)
+
+		if r.Header.Get("X-Croove-Session-Anonymous") == "open" {
+			log.Println("its ok")
+			handler.ServeHTTP(w, r)
+			return
+		}
+
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 		if err != nil || len(authHeader) <= 1 {
@@ -56,6 +96,33 @@ func validateJWT(handler http.Handler) http.Handler {
 			i := v.Interface()
 			a := i.(jwt.MapClaims)
 
+			log.Println("DENY")
+			log.Println(proxyConfig.Collection[r.Method+r.URL.String()].Deny)
+			if len(proxyConfig.Collection[r.Method+r.URL.String()].Deny.Method) > 0 {
+				log.Println("handle deny")
+			}
+			log.Println("ALLOW")
+			log.Println(proxyConfig.Collection[r.Method+r.URL.String()].Allow)
+			if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Method) > 0 {
+				found := false
+				for _, claim := range proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims {
+					for h, m := range a {
+						if claim.Key == h {
+							for _, v := range claim.Value {
+								if m == v {
+									found = true
+								}
+							}
+						}
+					}
+				}
+				if found == false {
+					log.Printf("ACCESS DENIED: Error %v\n", err)
+					w.WriteHeader(401)
+					return
+				}
+			}
+
 			for h, m := range a {
 				r.Header.Set("X-Croove-Session-"+h, fmt.Sprintf("%v", m))
 			}
@@ -65,12 +132,69 @@ func validateJWT(handler http.Handler) http.Handler {
 	})
 }
 
-func mapper(handler http.Handler) http.Handler {
+func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string) {
+	switch m {
+	case "GET":
+		router.GET(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+			proxyConfig.Collection[m+r.URL.String()] = ac
+			r.Header.Set("X-Croove-Session-Anonymous", status)
+			handler.ServeHTTP(w, r)
+		})
+	case "POST":
+		router.POST(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+			proxyConfig.Collection[m+r.URL.String()] = ac
+			r.Header.Set("X-Croove-Session-Anonymous", status)
+			handler.ServeHTTP(w, r)
+		})
+	case "PUT":
+		router.PUT(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+			proxyConfig.Collection[m+r.URL.String()] = ac
+			r.Header.Set("X-Croove-Session-Anonymous", status)
+			handler.ServeHTTP(w, r)
+		})
+	case "DELETE":
+		router.DELETE(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+			proxyConfig.Collection[m+r.URL.String()] = ac
+			r.Header.Set("X-Croove-Session-Anonymous", status)
+			handler.ServeHTTP(w, r)
+		})
+	case "HEAD":
+		router.HEAD(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+			proxyConfig.Collection[m+r.URL.String()] = ac
+			r.Header.Set("X-Croove-Session-Anonymous", status)
+			handler.ServeHTTP(w, r)
+		})
+	}
+}
+
+func mapper(handler http.Handler, url url.URL) *httprouter.Router {
 	router := httprouter.New()
-	// @TODO read this from the configuration file
-	router.GET("/*path", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		handler.ServeHTTP(w, r)
-	})
+
+	for _, p := range proxyConfig.Proxies {
+		if p.Connect.To == url.Host {
+			for _, r := range p.Routes {
+				// link open methods
+				if r.Open.Method != nil {
+					for _, m := range r.Open.Method {
+						httpMethodBuilder(m, r, handler, router, "open", r.Route)
+					}
+				}
+				// link allow methods
+				if r.Allow.Method != nil {
+					for _, m := range r.Allow.Method {
+						httpMethodBuilder(m, r, handler, router, "allow", r.Route)
+					}
+				}
+				// link deny methods
+				if r.Deny.Method != nil {
+					for _, m := range r.Deny.Method {
+						httpMethodBuilder(m, r, handler, router, "deny", r.Route)
+					}
+				}
+			}
+		}
+	}
+
 	return router
 }
 
@@ -84,7 +208,7 @@ func NewReverser(host string, port string) *Reverser {
 	// initialize our reverse proxy
 	reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
 	// wrap that proxy with our sameHostSameHeaders function
-	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy)))
+	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy)), *rpURL)
 
 	rev := Reverser{reverseProxy, singleHosted}
 	return &rev
@@ -93,22 +217,35 @@ func NewReverser(host string, port string) *Reverser {
 // Reverser Is a JWT reverse proxy
 type Reverser struct {
 	Proxy *httputil.ReverseProxy
-	Host  http.Handler
+	Host  *httprouter.Router
 }
+
+var proxyConfig JWTConfig
+var routingLayer httprouter.Router
 
 // Initiate
 func main() {
-	// parse ports from cmdline
-	for _, a := range os.Args[1 : len(os.Args)-1] {
-		ports := strings.Split(a, ":")
-		log.Println("ports:", ports)
-		rev := NewReverser("http://0.0.0.0:", ports[1])
-		go http.ListenAndServe(":"+ports[0], rev.Host)
+
+	file, err := ioutil.ReadFile("./config.json")
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	a := os.Args[len(os.Args)-1]
-	ports := strings.Split(a, ":")
-	log.Println("ports:", ports)
-	rev := NewReverser("http://0.0.0.0:", ports[1])
-	http.ListenAndServe(":"+ports[0], rev.Host)
+	//m := new(Dispatch)
+	//var m interface{}
+	err = json.Unmarshal(file, &proxyConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, pc := range proxyConfig.Proxies[:len(proxyConfig.Proxies)-1] {
+		log.Println("MORE THAN 1?", pc)
+	}
+	proxy := proxyConfig.Proxies[0]
+	proxyConfig.Collection = make(map[string]AccessControl)
+
+	to := strings.Split(proxy.Connect.To, ":")
+	from := strings.Split(proxy.Connect.From, ":")
+	rev := NewReverser("http://"+to[0]+":", to[1])
+	http.ListenAndServe(":"+from[1], rev.Host)
 }
