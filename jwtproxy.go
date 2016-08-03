@@ -18,12 +18,15 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
+// Proxies proxy config
+type Proxies struct {
+	Connect FromTo          `json:"connect"`
+	Routes  []AccessControl `json:"routes"`
+}
+
 // JWTConfig The configuration struct
 type JWTConfig struct {
-	Proxies []struct {
-		Connect FromTo          `json:"connect"`
-		Routes  []AccessControl `json:"routes"`
-	} `json:"proxies"`
+	Proxies    []Proxies `json:"proxies"`
 	Collection map[string]AccessControl
 }
 
@@ -39,14 +42,16 @@ type AccessControl struct {
 	Allow AccessDefinition `json:"allow"`
 }
 
+type claim struct {
+	Key   string
+	Value []string
+}
+
 // AccessDefinition access definitions
 type AccessDefinition struct {
 	Method []string `json:"method"`
 	Open   bool     `json:"open"`
-	Claims []struct {
-		Key   string
-		Value []string
-	} `json:"claims"`
+	Claims []claim  `json:"claims"`
 }
 
 func sameHostSameHeaders(handler http.Handler) http.Handler {
@@ -64,7 +69,7 @@ func sameHostSameHeaders(handler http.Handler) http.Handler {
 	})
 }
 
-func validateJWT(handler http.Handler) http.Handler {
+func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
@@ -127,7 +132,7 @@ func validateJWT(handler http.Handler) http.Handler {
 	})
 }
 
-func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string) {
+func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string, proxyConfig JWTConfig) {
 	log.Println("LINK:", m, url)
 	switch m {
 	case "GET":
@@ -163,7 +168,7 @@ func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router 
 	}
 }
 
-func mapper(handler http.Handler, url url.URL) *httprouter.Router {
+func mapper(handler http.Handler, url url.URL, proxyConfig JWTConfig) *httprouter.Router {
 	router := httprouter.New()
 
 	for _, p := range proxyConfig.Proxies {
@@ -172,7 +177,7 @@ func mapper(handler http.Handler, url url.URL) *httprouter.Router {
 				// link allow methods
 				if r.Allow.Method != nil {
 					for _, m := range r.Allow.Method {
-						httpMethodBuilder(m, r, handler, router, "allow", r.Route)
+						httpMethodBuilder(m, r, handler, router, "allow", r.Route, proxyConfig)
 					}
 				}
 			}
@@ -183,16 +188,17 @@ func mapper(handler http.Handler, url url.URL) *httprouter.Router {
 }
 
 // NewReverser creates a new reverser type
-func NewReverser(host string, port string) *Reverser {
+func NewReverser(host string, port string, proxyConf JWTConfig) *Reverser {
 	rpURL, err := url.Parse(host + port)
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Println("TO(2)", rpURL)
 
 	// initialize our reverse proxy
 	reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
 	// wrap that proxy with our sameHostSameHeaders function
-	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy)), *rpURL)
+	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy), proxyConf), *rpURL, proxyConf)
 
 	rev := Reverser{reverseProxy, singleHosted}
 	return &rev
@@ -204,12 +210,9 @@ type Reverser struct {
 	Host  *httprouter.Router
 }
 
-var proxyConfig JWTConfig
-var routingLayer httprouter.Router
-
 // Initiate
 func main() {
-
+	var proxyConfig JWTConfig
 	configPath := flag.String("config", "./config.json", "Configuration file")
 	flag.Parse()
 	fmt.Println("config:", *configPath)
@@ -233,7 +236,7 @@ func main() {
 
 	to := strings.Split(proxy.Connect.To, ":")
 	from := strings.Split(proxy.Connect.From, ":")
-	rev := NewReverser("http://"+to[0]+":", to[1])
+	rev := NewReverser("http://"+to[0]+":", to[1], proxyConfig)
 	log.Println("Initialized and proxy started on:", from[1])
 	log.Fatal(http.ListenAndServe(":"+from[1], rev.Host))
 }

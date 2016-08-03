@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -48,12 +49,38 @@ func TestJWTServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rev := NewReverser(server.URL, "")
-	reverser := httptest.NewServer(rev.Host)
+	reverser := httptest.NewUnstartedServer(nil)
+	rev := NewReverser(server.URL, "", JWTConfig{
+		Proxies: []Proxies{
+			{
+				Connect: FromTo{
+					From: strings.Replace(reverser.URL, "http://", "", -1),
+					To:   strings.Replace(server.URL, "http://", "", -1),
+				},
+				Routes: []AccessControl{
+					{
+						Route: "/closed",
+						Allow: AccessDefinition{
+							Method: []string{"GET"},
+							Claims: []claim{
+								{Key: "foo", Value: []string{"bar"}},
+							},
+						},
+					},
+				},
+			},
+		},
+		Collection: make(map[string]AccessControl),
+	})
+	reverser.Config = &http.Server{Handler: rev.Host}
+	reverser.Start()
 	defer reverser.Close()
 
+	log.Println("FROM:", reverser.URL)
+	log.Println("TO  :", server.URL)
+	log.Println("req.:", reverser.URL+"/closed")
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", reverser.URL, nil)
+	req, err := http.NewRequest("GET", reverser.URL+"/closed", nil)
 
 	req.Header.Add("Authorization", `Bearer `+ss)
 
