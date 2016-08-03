@@ -1,13 +1,12 @@
-JWT (token validator) PROXY
-===========================
+JWT (token validator & ACL) PROXY
+=================================
 
-A very simpel JWT token validator proxy.
+A very simpel JWT token validator and ACL proxy.
 
 #Example use
 
 ```
-# JWT_SECRET=<secret> jwtproxy <from>:<to>
-JWT_SECRET=youverysecretsecret jwtproxy 5000:3000 5001:3001
+JWT_SECRET=<secret> jwtproxy -config=./config.json
 ```
 
 #Noticeable JWT proxies

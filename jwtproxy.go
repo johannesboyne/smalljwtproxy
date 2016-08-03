@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -209,7 +210,11 @@ var routingLayer httprouter.Router
 // Initiate
 func main() {
 
-	file, err := ioutil.ReadFile("./config.json")
+	configPath := flag.String("config", "./config.json", "Configuration file")
+	flag.Parse()
+	fmt.Println("config:", *configPath)
+
+	file, err := ioutil.ReadFile(*configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -220,7 +225,8 @@ func main() {
 	}
 
 	for _, pc := range proxyConfig.Proxies[:len(proxyConfig.Proxies)-1] {
-		log.Println("MORE THAN 1?", pc)
+		log.Println("MORE THAN 1? Sorry not implemented", pc)
+		panic("not implemented")
 	}
 	proxy := proxyConfig.Proxies[0]
 	proxyConfig.Collection = make(map[string]AccessControl)
