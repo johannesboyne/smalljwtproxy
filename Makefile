@@ -6,5 +6,5 @@ install:
 	go get github.com/julienschmidt/httprouter
 	go build jwtproxy.go
 
-start: install
+start:
 	./jwtproxy

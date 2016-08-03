@@ -3,14 +3,11 @@
     {
       "connect": {
         "from": "0.0.0.0:5000",
-        "to": "0.0.0.0:3000"
+        "to": "127.0.0.1:8080"
       },
       "routes": [
         {
           "route": "/cars/*path",
-          "open": {
-            "method": ["GET"]
-          },
           "allow": {
             "method": ["POST", "PUT", "DELETE"],
             "claims": [
@@ -19,12 +16,31 @@
             ]
           }
         },
-        {
-          "route": "/users/:user",
+{
+          "route": "/cars/*path",
           "allow": {
-            "method": ["GET", "POST"],
+            "method": ["GET"],
+            "open": true,
+            "claims": []
+          }
+        },
+        {
+          "route": "/config/*configs",
+          "allow": {
+            "method": ["GET"],
+            "open": true,
             "claims": [
               {"key": "role", "value": ["customer", "admin", "support"]}
+            ]
+          }
+        },
+        {
+          "route": "/config/*configs",
+          "allow": {
+            "method": ["PUT"],
+            "claims": [
+              {"key": "role", "value": ["customer", "admin", "support"]},
+              {"key": "foo", "value": ["bar"]}
             ]
           }
         }

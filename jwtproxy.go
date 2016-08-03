@@ -35,14 +35,13 @@ type FromTo struct {
 // AccessControl defines allow / deny and open pathes
 type AccessControl struct {
 	Route string           `json:"route"`
-	Open  AccessDefinition `json:"open"`
 	Allow AccessDefinition `json:"allow"`
-	Deny  AccessDefinition `json:"deny"`
 }
 
 // AccessDefinition access definitions
 type AccessDefinition struct {
 	Method []string `json:"method"`
+	Open   bool     `json:"open"`
 	Claims []struct {
 		Key   string
 		Value []string
@@ -66,15 +65,15 @@ func sameHostSameHeaders(handler http.Handler) http.Handler {
 
 func validateJWT(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
+		authHeader := strings.Split(tokenString, "Bearer ")
 
-		if r.Header.Get("X-Croove-Session-Anonymous") == "open" {
-			log.Println("its ok")
+		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open && err != nil {
+			log.Println("No JWT and open route:", r.URL.String())
 			handler.ServeHTTP(w, r)
 			return
 		}
 
-		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
-		authHeader := strings.Split(tokenString, "Bearer ")
 		if err != nil || len(authHeader) <= 1 {
 			log.Printf("ACCESS DENIED: No Authorization Bearer, %v\n", err)
 			w.WriteHeader(401)
@@ -96,11 +95,6 @@ func validateJWT(handler http.Handler) http.Handler {
 			i := v.Interface()
 			a := i.(jwt.MapClaims)
 
-			log.Println("DENY")
-			log.Println(proxyConfig.Collection[r.Method+r.URL.String()].Deny)
-			if len(proxyConfig.Collection[r.Method+r.URL.String()].Deny.Method) > 0 {
-				log.Println("handle deny")
-			}
 			log.Println("ALLOW")
 			log.Println(proxyConfig.Collection[r.Method+r.URL.String()].Allow)
 			if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Method) > 0 {
@@ -133,6 +127,7 @@ func validateJWT(handler http.Handler) http.Handler {
 }
 
 func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string) {
+	log.Println("LINK:", m, url)
 	switch m {
 	case "GET":
 		router.GET(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -173,22 +168,10 @@ func mapper(handler http.Handler, url url.URL) *httprouter.Router {
 	for _, p := range proxyConfig.Proxies {
 		if p.Connect.To == url.Host {
 			for _, r := range p.Routes {
-				// link open methods
-				if r.Open.Method != nil {
-					for _, m := range r.Open.Method {
-						httpMethodBuilder(m, r, handler, router, "open", r.Route)
-					}
-				}
 				// link allow methods
 				if r.Allow.Method != nil {
 					for _, m := range r.Allow.Method {
 						httpMethodBuilder(m, r, handler, router, "allow", r.Route)
-					}
-				}
-				// link deny methods
-				if r.Deny.Method != nil {
-					for _, m := range r.Deny.Method {
-						httpMethodBuilder(m, r, handler, router, "deny", r.Route)
 					}
 				}
 			}
