@@ -68,7 +68,7 @@ func validateJWT(handler http.Handler) http.Handler {
 func mapper(handler http.Handler) http.Handler {
 	router := httprouter.New()
 	// @TODO read this from the configuration file
-	router.GET("/", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	router.GET("/*path", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		handler.ServeHTTP(w, r)
 	})
 	return router
