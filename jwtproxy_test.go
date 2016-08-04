@@ -50,7 +50,7 @@ func TestJWTServer(t *testing.T) {
 
 	reverser := httptest.NewUnstartedServer(nil)
 	rev := NewReverser(server.URL, "", JWTConfig{
-		Proxies: []Proxies{
+		Proxies: []Proxy{
 			{
 				Connect: FromTo{
 					From: strings.Replace(reverser.URL, "http://", "", -1),
