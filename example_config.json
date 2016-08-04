@@ -14,7 +14,7 @@
         ]
       }
     },
-{
+    {
       "route": "/cars/*path",
       "allow": {
         "method": ["GET"],
