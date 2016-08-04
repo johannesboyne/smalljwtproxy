@@ -4,7 +4,7 @@ build:
 	go get github.com/dgrijalva/jwt-go
 	go get github.com/dgrijalva/jwt-go/request
 	go get github.com/julienschmidt/httprouter
-	go build jwtproxy.go
+	go build
 
 start:
-	./jwtproxy
+	./croove-jwt-proxy
