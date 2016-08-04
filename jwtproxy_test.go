@@ -58,7 +58,7 @@ func TestJWTServer(t *testing.T) {
 				},
 				Routes: []AccessControl{
 					{
-						Route: "/closed",
+						Route: "/closed/:id/andfurther/:second",
 						Allow: AccessDefinition{
 							Method: []string{"GET"},
 							Claims: []claim{
@@ -84,7 +84,7 @@ func TestJWTServer(t *testing.T) {
 	defer reverser.Close()
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", reverser.URL+"/closed", nil)
+	req, err := http.NewRequest("GET", reverser.URL+"/closed/123/andfurther/567", nil)
 	req.Header.Add("Authorization", `Bearer `+ss)
 	res, err := client.Do(req)
 

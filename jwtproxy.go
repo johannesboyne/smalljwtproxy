@@ -72,10 +72,24 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 
+		for route := range proxyConfig.Collection {
+			path := strings.Replace(route, r.Method, "", -1)
+			log.Println("> PATH:", path)
+		}
+
 		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open == true {
-			log.Println("No JWT or Open route:", r.URL.String())
-			handler.ServeHTTP(w, r)
-			return
+			log.Println("Open route:", r.URL.String())
+			log.Println("- check JWT:")
+			log.Println("- - tokenString", tokenString)
+			log.Println("- - err", err)
+			log.Println("- - authHeader", authHeader)
+			if err == nil && len(authHeader) == 2 && len(authHeader[1]) > 15 {
+				log.Println("<-- found JWT, check validity")
+			} else {
+				log.Println("<-- no JWT stop JWT checking")
+				handler.ServeHTTP(w, r)
+				return
+			}
 		}
 
 		if err != nil || len(authHeader) <= 1 {
@@ -102,6 +116,7 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 			if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Method) > 0 {
 				found := false
 				potentialErrorMsg := ""
+
 				for _, claim := range proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims {
 					for h, m := range a {
 						potentialErrorMsg += fmt.Sprintf("[%v]%v\n", h, m)
@@ -115,6 +130,13 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 						}
 					}
 				}
+
+				log.Println("config claim length:", len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims))
+				if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims) <= 0 {
+					log.Println("ALLOW access, no claims and allow route == open")
+					found = true
+				}
+
 				if found == false {
 					log.Printf("ACCESS DENIED: Error: No matching K/V in claims\n%s\n", potentialErrorMsg)
 					w.WriteHeader(401)
@@ -123,6 +145,7 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 			}
 
 			for h, m := range a {
+				log.Printf("set x-croove-session-%v: %v", h, m)
 				r.Header.Set("X-Croove-Session-"+h, fmt.Sprintf("%v", m))
 			}
 
