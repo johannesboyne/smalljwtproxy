@@ -1,3 +1,4 @@
 config.json
 /jwtproxy
 /croove-jwt-proxy
+/.DS_Store
