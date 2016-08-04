@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,6 +66,14 @@ func TestJWTServer(t *testing.T) {
 							},
 						},
 					},
+					{
+						Route: "/open",
+						Allow: AccessDefinition{
+							Method: []string{"GET"},
+							Open:   true,
+							Claims: []claim{},
+						},
+					},
 				},
 			},
 		},
@@ -76,29 +83,35 @@ func TestJWTServer(t *testing.T) {
 	reverser.Start()
 	defer reverser.Close()
 
-	log.Println("FROM:", reverser.URL)
-	log.Println("TO  :", server.URL)
-	log.Println("req.:", reverser.URL+"/closed")
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", reverser.URL+"/closed", nil)
-
 	req.Header.Add("Authorization", `Bearer `+ss)
-
 	res, err := client.Do(req)
+
+	req2, err := http.NewRequest("GET", reverser.URL+"/open", nil)
+	res2, err := client.Do(req2)
 
 	if err != nil {
 		t.Errorf(fmt.Sprintf("%v", err))
 	}
 	returnbody, err := ioutil.ReadAll(res.Body)
 	res.Body.Close()
+	returnbody2, err := ioutil.ReadAll(res2.Body)
+	res2.Body.Close()
 
 	if res.Status != "200 OK" {
 		t.Errorf("Status %s\nStatus not 200", res.Status)
+	}
+	if res2.Status != "200 OK" {
+		t.Errorf("Status %s\nStatus not 200", res2.Status)
 	}
 	if err != nil {
 		t.Errorf(fmt.Sprintf("%v", err))
 	}
 	if strings.Trim(string(returnbody), "\n") != sampleResponse {
+		t.Errorf("Return body mismatches")
+	}
+	if strings.Trim(string(returnbody2), "\n") != sampleResponse {
 		t.Errorf("Return body mismatches")
 	}
 }
