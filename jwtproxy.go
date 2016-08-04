@@ -74,8 +74,8 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 
-		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open && err != nil {
-			log.Println("No JWT and open route:", r.URL.String())
+		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open == true && err == nil {
+			log.Println("No JWT or Open route:", r.URL.String())
 			handler.ServeHTTP(w, r)
 			return
 		}
