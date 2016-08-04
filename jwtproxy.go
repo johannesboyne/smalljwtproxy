@@ -210,26 +210,42 @@ type Reverser struct {
 	Host  *httprouter.Router
 }
 
+type arrayFlags []string
+
+func (i *arrayFlags) String() string {
+	return fmt.Sprintf("%s", *i)
+}
+
+func (i *arrayFlags) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
+
 // Initiate
 func main() {
+	var configPath arrayFlags
 	var proxyConfig JWTConfig
-	configPath := flag.String("config", "./config.json", "Configuration file")
+
+	flag.Var(&configPath, "config", "Configuration file")
 	flag.Parse()
-	fmt.Println("config:", *configPath)
 
-	file, err := ioutil.ReadFile(*configPath)
-	if err != nil {
-		log.Fatal(err)
-	}
+	for _, c := range configPath {
+		fmt.Printf("config: %s\n", c)
 
-	err = json.Unmarshal(file, &proxyConfig)
-	if err != nil {
-		log.Fatal(err)
-	}
+		file, err := ioutil.ReadFile(c)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	for _, pc := range proxyConfig.Proxies[:len(proxyConfig.Proxies)-1] {
-		log.Println("MORE THAN 1? Sorry not implemented", pc)
-		panic("not implemented")
+		err = json.Unmarshal(file, &proxyConfig)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for _, pc := range proxyConfig.Proxies[:len(proxyConfig.Proxies)-1] {
+			log.Println("MORE THAN 1? Sorry not implemented", pc)
+			panic("not implemented")
+		}
 	}
 	proxy := proxyConfig.Proxies[0]
 	proxyConfig.Collection = make(map[string]AccessControl)
