@@ -71,10 +71,11 @@ func sameHostSameHeaders(handler http.Handler) http.Handler {
 
 func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("CHECK:", r.URL.String(), r.Method)
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 
-		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open == true && err == nil {
+		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open == true {
 			log.Println("No JWT or Open route:", r.URL.String())
 			handler.ServeHTTP(w, r)
 			return
@@ -101,8 +102,6 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 			i := v.Interface()
 			a := i.(jwt.MapClaims)
 
-			log.Println("ALLOW")
-			log.Println(proxyConfig.Collection[r.Method+r.URL.String()].Allow)
 			if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Method) > 0 {
 				found := false
 				for _, claim := range proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims {
@@ -193,7 +192,6 @@ func NewReverser(host string, port string, proxyConf JWTConfig) *Reverser {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("TO(2)", rpURL)
 
 	// initialize our reverse proxy
 	reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
