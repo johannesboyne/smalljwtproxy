@@ -101,10 +101,13 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 
 			if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Method) > 0 {
 				found := false
+				potentialErrorMsg := ""
 				for _, claim := range proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims {
 					for h, m := range a {
+						potentialErrorMsg += fmt.Sprintf("[%v]%v\n", h, m)
 						if claim.Key == h {
 							for _, v := range claim.Value {
+								potentialErrorMsg += fmt.Sprintf("\t check: %v\n", v)
 								if m == v {
 									found = true
 								}
@@ -113,7 +116,7 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 					}
 				}
 				if found == false {
-					log.Printf("ACCESS DENIED: Error %v\n", err)
+					log.Printf("ACCESS DENIED: Error: No matching K/V in claims\n%s\n", potentialErrorMsg)
 					w.WriteHeader(401)
 					return
 				}
