@@ -20,20 +20,10 @@ type MyCustomClaims struct {
 	jwt.StandardClaims
 }
 
-func SetupTestServer() *httptest.Server {
-	// Test server that always responds with 200 code, and specific payload
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, sampleResponse)
-	}))
-	defer server.Close()
-	return server
-}
-
 func TestJWTServer(t *testing.T) {
 
 	os.Setenv("JWT_SECRET", "shhhhh")
+	mySigningKey := []byte("shhhhh")
 
 	now := time.Now().Add(time.Second)
 	secs := now.Unix()
@@ -45,13 +35,19 @@ func TestJWTServer(t *testing.T) {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	ss, err := token.SignedString(os.Getenv("JWT_SECRET"))
+	ss, err := token.SignedString(mySigningKey)
 
 	if err != nil {
 		panic(err)
 	}
 
-	server := SetupTestServer()
+	// Test server that always responds with 200 code, and specific payload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, sampleResponse)
+	}))
+	defer server.Close()
 
 	reverser := httptest.NewUnstartedServer(nil)
 	rev := NewReverser(server.URL, "", Proxy{
