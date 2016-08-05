@@ -15,15 +15,26 @@ import (
 
 const sampleResponse = `valid return value`
 
+type MyCustomClaims struct {
+	Foo string `json:"foo"`
+	jwt.StandardClaims
+}
+
+func SetupTestServer() *httptest.Server {
+	// Test server that always responds with 200 code, and specific payload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, sampleResponse)
+	}))
+	defer server.Close()
+	return server
+}
+
 func TestJWTServer(t *testing.T) {
 
 	os.Setenv("JWT_SECRET", "shhhhh")
-	mySigningKey := []byte("shhhhh")
 
-	type MyCustomClaims struct {
-		Foo string `json:"foo"`
-		jwt.StandardClaims
-	}
 	now := time.Now().Add(time.Second)
 	secs := now.Unix()
 	// Create the Claims
@@ -34,46 +45,37 @@ func TestJWTServer(t *testing.T) {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	ss, err := token.SignedString(mySigningKey)
+	ss, err := token.SignedString(os.Getenv("JWT_SECRET"))
 
 	if err != nil {
 		panic(err)
 	}
 
-	// Test server that always responds with 200 code, and specific payload
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, sampleResponse)
-	}))
-	defer server.Close()
+	server := SetupTestServer()
 
 	reverser := httptest.NewUnstartedServer(nil)
-	rev := NewReverser(server.URL, "", JWTConfig{
-		Proxies: []Proxy{
+	rev := NewReverser(server.URL, "", Proxy{
+		Connect: FromTo{
+			From:       strings.Replace(reverser.URL, "http://", "", -1),
+			To:         strings.Replace(server.URL, "http://", "", -1),
+			PathPrefix: "",
+		},
+		Routes: []AccessControl{
 			{
-				Connect: FromTo{
-					From: strings.Replace(reverser.URL, "http://", "", -1),
-					To:   strings.Replace(server.URL, "http://", "", -1),
+				Route: "/closed/:id/andfurther/:second",
+				Allow: AccessDefinition{
+					Method: []string{"GET"},
+					Claims: []claim{
+						{Key: "foo", Value: []string{"bar"}},
+					},
 				},
-				Routes: []AccessControl{
-					{
-						Route: "/closed/:id/andfurther/:second",
-						Allow: AccessDefinition{
-							Method: []string{"GET"},
-							Claims: []claim{
-								{Key: "foo", Value: []string{"bar"}},
-							},
-						},
-					},
-					{
-						Route: "/open",
-						Allow: AccessDefinition{
-							Method: []string{"GET"},
-							Open:   true,
-							Claims: []claim{},
-						},
-					},
+			},
+			{
+				Route: "/open",
+				Allow: AccessDefinition{
+					Method: []string{"GET"},
+					Open:   true,
+					Claims: []claim{},
 				},
 			},
 		},

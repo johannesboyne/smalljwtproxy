@@ -17,20 +17,21 @@ import (
 
 // Proxy proxy config
 type Proxy struct {
-	Connect FromTo          `json:"connect"`
-	Routes  []AccessControl `json:"routes"`
+	Connect    FromTo          `json:"connect"`
+	Routes     []AccessControl `json:"routes"`
+	Collection map[string]AccessControl
 }
 
 // JWTConfig The configuration struct
 type JWTConfig struct {
-	Proxies    []Proxy `json:"proxies"`
-	Collection map[string]AccessControl
+	Proxies []Proxy `json:"proxies"`
 }
 
 // FromTo definition
 type FromTo struct {
-	From string
-	To   string
+	From       string
+	To         string
+	PathPrefix string `json:"pathPrefix"`
 }
 
 // AccessControl defines allow / deny and open pathes
@@ -66,7 +67,7 @@ func sameHostSameHeaders(handler http.Handler) http.Handler {
 	})
 }
 
-func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
+func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Println("CHECK:", r.URL.String(), r.Method)
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
@@ -154,35 +155,35 @@ func validateJWT(handler http.Handler, proxyConfig JWTConfig) http.Handler {
 	})
 }
 
-func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string, proxyConfig JWTConfig) {
+func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string, proxyConfig Proxy) {
 	log.Println("LINK:", m, url)
 	switch m {
 	case "GET":
-		router.GET(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.GET(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
 			r.Header.Set("X-Croove-Session-Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "POST":
-		router.POST(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.POST(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
 			r.Header.Set("X-Croove-Session-Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "PUT":
-		router.PUT(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.PUT(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
 			r.Header.Set("X-Croove-Session-Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "DELETE":
-		router.DELETE(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.DELETE(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
 			r.Header.Set("X-Croove-Session-Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "HEAD":
-		router.HEAD(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HEAD(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
 			r.Header.Set("X-Croove-Session-Anonymous", status)
 			handler.ServeHTTP(w, r)
@@ -190,17 +191,15 @@ func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router 
 	}
 }
 
-func mapper(handler http.Handler, url url.URL, proxyConfig JWTConfig) *httprouter.Router {
+func mapper(handler http.Handler, url url.URL, proxyConfig Proxy) *httprouter.Router {
 	router := httprouter.New()
 
-	for _, p := range proxyConfig.Proxies {
-		if p.Connect.To == url.Host {
-			for _, r := range p.Routes {
-				// link allow methods
-				if r.Allow.Method != nil {
-					for _, m := range r.Allow.Method {
-						httpMethodBuilder(m, r, handler, router, "allow", r.Route, proxyConfig)
-					}
+	if proxyConfig.Connect.To == url.Host {
+		for _, r := range proxyConfig.Routes {
+			// link allow methods
+			if r.Allow.Method != nil {
+				for _, m := range r.Allow.Method {
+					httpMethodBuilder(m, r, handler, router, "allow", r.Route, proxyConfig)
 				}
 			}
 		}
@@ -209,15 +208,37 @@ func mapper(handler http.Handler, url url.URL, proxyConfig JWTConfig) *httproute
 	return router
 }
 
+// NewSingleHostReverseProxy is cool
+func NewSingleHostReverseProxy(target *url.URL, pathPrefix string) *httputil.ReverseProxy {
+	targetQuery := target.RawQuery
+	director := func(req *http.Request) {
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+		pather := target.Path + req.URL.Path
+		log.Println("Replace pathPrefix if necessary:", pather)
+		req.URL.Path = strings.Replace(pather, pathPrefix, "", 1)
+		log.Println("New URL (without path Prefix   :", req.URL.Path)
+		req.Host = ""
+		// --
+		if targetQuery == "" || req.URL.RawQuery == "" {
+			req.URL.RawQuery = targetQuery + req.URL.RawQuery
+		} else {
+			req.URL.RawQuery = targetQuery + "&" + req.URL.RawQuery
+		}
+	}
+	return &httputil.ReverseProxy{Director: director}
+}
+
 // NewReverser creates a new reverser type
-func NewReverser(host string, port string, proxyConf JWTConfig) *Reverser {
+func NewReverser(host string, port string, proxyConf Proxy) *Reverser {
 	rpURL, err := url.Parse(host + port)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// initialize our reverse proxy
-	reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
+	//reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
+	reverseProxy := NewSingleHostReverseProxy(rpURL, proxyConf.Connect.PathPrefix)
 	// wrap that proxy with our sameHostSameHeaders function
 	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy), proxyConf), *rpURL, proxyConf)
 
