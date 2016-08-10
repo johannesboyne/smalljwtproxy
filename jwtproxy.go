@@ -189,6 +189,14 @@ func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router 
 			handler.ServeHTTP(w, r)
 		})
 	}
+	// always OPTIONS
+	router.OPTIONS(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		r.Header.Set("Access-Control-Allow-Origin", "*")
+		r.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, HEAD, OPTIONS")
+		r.Header.Set("Access-Control-Allow-Headers", "X-Custom-Header")
+		r.Header.Set("X-Croove-Session-Anonymous", status)
+		handler.ServeHTTP(w, r)
+	})
 }
 
 func mapper(handler http.Handler, url url.URL, proxyConfig Proxy) *httprouter.Router {
