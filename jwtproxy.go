@@ -196,8 +196,13 @@ func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router 
 			log.Println("set cors", r.URL)
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, HEAD, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "X-Custom-Header")
-			w.Header().Set("X-Croove-Test", "foo")
+			if len(r.Header["Access-Control-Request-Headers"]) > 0 {
+				allowHeadersString := ""
+				for _, header := range r.Header["Access-Control-Request-Headers"] {
+					allowHeadersString += header + ","
+				}
+				w.Header().Set("Access-Control-Allow-Headers", allowHeadersString)
+			}
 			w.Write([]byte(""))
 			return
 		})
