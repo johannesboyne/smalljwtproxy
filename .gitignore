@@ -3,3 +3,4 @@ config.json
 /croove-jwt-proxy
 /.DS_Store
 /croove-jwt-acl-proxy
+node_modules
