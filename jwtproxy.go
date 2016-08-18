@@ -22,16 +22,16 @@ type Proxy struct {
 	Collection map[string]AccessControl
 }
 
-// JWTConfig The configuration struct
+// JWTConfig configuration struct
 type JWTConfig struct {
 	Proxies []Proxy `json:"proxies"`
 }
 
 // FromTo definition
 type FromTo struct {
-	From       string
-	To         string
-	PathPrefix string `json:"pathPrefix"`
+	From         string
+	To           string
+	HeaderPrefix string `json:"header-prefix"`
 }
 
 // AccessControl defines allow / deny and open pathes
@@ -40,6 +40,7 @@ type AccessControl struct {
 	Allow AccessDefinition `json:"allow"`
 }
 
+// JWT Claims
 type claim struct {
 	Key   string
 	Value []string
@@ -52,24 +53,39 @@ type AccessDefinition struct {
 	Claims []claim  `json:"claims"`
 }
 
+// Apply host and header values
 func sameHostSameHeaders(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for h := range r.Header {
 			r.Header.Set(h, r.Header.Get(h))
 		}
-		for h := range w.Header() {
-			w.Header().Set(h, r.Header.Get(h))
-		}
-
 		r.Host = r.URL.Host
-
 		handler.ServeHTTP(w, r)
 	})
 }
 
+// Add CORS Headers
+func addCORSHeaders(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *http.Request) {
+	log.Println("CORS Headers added")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, HEAD, OPTIONS")
+	if len(r.Header["Access-Control-Request-Headers"]) > 0 {
+		allowHeadersString := ""
+		for _, header := range r.Header["Access-Control-Request-Headers"] {
+			allowHeadersString += header + ","
+		}
+		w.Header().Set("Access-Control-Allow-Headers", allowHeadersString)
+	}
+	return w, r
+}
+
+// Validate JWT & ACL
 func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Println("CHECK:", r.URL.String(), r.Method)
+		log.Println("Add CORS headers for safety reasons")
+		w, r = addCORSHeaders(w, r)
+
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 
@@ -132,7 +148,6 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 					}
 				}
 
-				log.Println("config claim length:", len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims))
 				if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims) <= 0 {
 					log.Println("ALLOW access, no claims and allow route == open")
 					found = true
@@ -146,8 +161,8 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 			}
 
 			for h, m := range a {
-				log.Printf("set x-croove-session-%v: %v", h, m)
-				r.Header.Set("X-Croove-Session-"+h, fmt.Sprintf("%v", m))
+				log.Printf("set %s%v: %v", proxyConfig.Connect.HeaderPrefix, h, m)
+				r.Header.Set(proxyConfig.Connect.HeaderPrefix+h, fmt.Sprintf("%v", m))
 			}
 
 			handler.ServeHTTP(w, r)
@@ -155,54 +170,47 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 	})
 }
 
+// Build all HTTP Methods
 func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string, proxyConfig Proxy) {
 	log.Println("LINK:", m, url)
 	switch m {
 	case "GET":
-		router.GET(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.GET(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set("X-Croove-Session-Anonymous", status)
+			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "POST":
-		router.POST(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.POST(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set("X-Croove-Session-Anonymous", status)
+			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "PUT":
-		router.PUT(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.PUT(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set("X-Croove-Session-Anonymous", status)
+			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "DELETE":
-		router.DELETE(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.DELETE(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set("X-Croove-Session-Anonymous", status)
+			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	case "HEAD":
-		router.HEAD(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HEAD(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set("X-Croove-Session-Anonymous", status)
+			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
 			handler.ServeHTTP(w, r)
 		})
 	}
 	// always OPTIONS
-	if h, _, _ := router.Lookup("OPTIONS", proxyConfig.Connect.PathPrefix+ac.Route); h == nil {
+	if h, _, _ := router.Lookup("OPTIONS", ac.Route); h == nil {
 		log.Println("LINK: OPTIONS", url)
-		router.OPTIONS(proxyConfig.Connect.PathPrefix+ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.OPTIONS(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 			log.Println("set cors", r.URL)
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, HEAD, OPTIONS")
-			if len(r.Header["Access-Control-Request-Headers"]) > 0 {
-				allowHeadersString := ""
-				for _, header := range r.Header["Access-Control-Request-Headers"] {
-					allowHeadersString += header + ","
-				}
-				w.Header().Set("Access-Control-Allow-Headers", allowHeadersString)
-			}
+			w, r = addCORSHeaders(w, r)
 			w.Write([]byte(""))
 			return
 		})
@@ -210,9 +218,9 @@ func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router 
 
 }
 
+// Map routes and methods
 func mapper(handler http.Handler, url url.URL, proxyConfig Proxy) *httprouter.Router {
 	router := httprouter.New()
-
 	if proxyConfig.Connect.To == url.Host {
 		for _, r := range proxyConfig.Routes {
 			// link allow methods
@@ -223,20 +231,15 @@ func mapper(handler http.Handler, url url.URL, proxyConfig Proxy) *httprouter.Ro
 			}
 		}
 	}
-
 	return router
 }
 
 // NewSingleHostReverseProxy is cool
-func NewSingleHostReverseProxy(target *url.URL, pathPrefix string) *httputil.ReverseProxy {
+func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
 	targetQuery := target.RawQuery
 	director := func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
-		pather := target.Path + req.URL.Path
-		log.Println("Replace pathPrefix if necessary:", pather)
-		req.URL.Path = strings.Replace(pather, pathPrefix, "", 1)
-		log.Println("New URL (without path Prefix   :", req.URL.Path)
 		req.Host = ""
 		// --
 		if targetQuery == "" || req.URL.RawQuery == "" {
@@ -254,13 +257,10 @@ func NewReverser(host string, port string, proxyConf Proxy) *Reverser {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	// initialize our reverse proxy
-	//reverseProxy := httputil.NewSingleHostReverseProxy(rpURL)
-	reverseProxy := NewSingleHostReverseProxy(rpURL, proxyConf.Connect.PathPrefix)
+	reverseProxy := NewSingleHostReverseProxy(rpURL)
 	// wrap that proxy with our sameHostSameHeaders function
 	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy), proxyConf), *rpURL, proxyConf)
-
 	rev := Reverser{reverseProxy, singleHosted}
 	return &rev
 }

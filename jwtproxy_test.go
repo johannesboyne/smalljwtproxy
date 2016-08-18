@@ -52,9 +52,8 @@ func TestJWTServer(t *testing.T) {
 	reverser := httptest.NewUnstartedServer(nil)
 	rev := NewReverser(server.URL, "", Proxy{
 		Connect: FromTo{
-			From:       strings.Replace(reverser.URL, "http://", "", -1),
-			To:         strings.Replace(server.URL, "http://", "", -1),
-			PathPrefix: "",
+			From: strings.Replace(reverser.URL, "http://", "", -1),
+			To:   strings.Replace(server.URL, "http://", "", -1),
 		},
 		Routes: []AccessControl{
 			{
