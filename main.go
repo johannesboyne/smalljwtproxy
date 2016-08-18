@@ -6,7 +6,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+
+	"github.com/hashicorp/logutils"
 )
 
 type arrayFlags []string
@@ -20,17 +23,28 @@ func (i *arrayFlags) Set(value string) error {
 	return nil
 }
 
+const initLog = "initialized and proxy started on:"
+
 // Initiate
 func main() {
 	var configPath arrayFlags
 	var configs [][]byte
 
+	logLevel := flag.String("log", "INFO", "Log Level (DEBUG; INFO; WARN; ERROR)")
 	flag.Var(&configPath, "config", "Configuration file")
 	flag.Parse()
 
-	for _, c := range configPath {
-		fmt.Printf("config: %s\n", c)
+	// Setup logging
+	filter := &logutils.LevelFilter{
+		Levels:   []logutils.LogLevel{"DEBUG", "INFO", "WARN", "ERROR"},
+		MinLevel: logutils.LogLevel(*logLevel),
+		Writer:   os.Stderr,
+	}
+	log.SetOutput(filter)
 
+	// Collect different config files if necessary
+	for _, c := range configPath {
+		log.Printf("[DEBUG] load config: %s\n", c)
 		file, err := ioutil.ReadFile(c)
 		if err != nil {
 			log.Fatal(err)
@@ -41,17 +55,15 @@ func main() {
 	proxyConfig := ParseConfig(configs)
 
 	if len(proxyConfig.Proxies) >= 1 {
-		log.Println("legnth >= 1")
 		for _, pc := range proxyConfig.Proxies[1:len(proxyConfig.Proxies)] {
-			log.Println(1, len(proxyConfig.Proxies)-1)
 			go func(proxy Proxy) {
-				log.Println("setup")
+				log.Println("[DEBUG] start proxy...")
 				proxy.Collection = make(map[string]AccessControl)
 
 				to := strings.Split(proxy.Connect.To, ":")
 				from := strings.Split(proxy.Connect.From, ":")
 				rev := NewReverser("http://"+to[0]+":", to[1], proxy)
-				log.Println("Initialized and proxy started on:", from[1])
+				log.Printf("[DEBUG] %s %v\n", initLog, from[1])
 				log.Fatal(http.ListenAndServe(":"+from[1], rev.Host))
 			}(pc)
 		}
@@ -63,6 +75,6 @@ func main() {
 	to := strings.Split(proxy.Connect.To, ":")
 	from := strings.Split(proxy.Connect.From, ":")
 	rev := NewReverser("http://"+to[0]+":", to[1], proxy)
-	log.Println("Initialized and proxy started on:", from[1])
+	log.Printf("[DEBUG] %s %v\n", initLog, from[1])
 	log.Fatal(http.ListenAndServe(":"+from[1], rev.Host))
 }
