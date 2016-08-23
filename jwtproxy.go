@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -66,7 +65,7 @@ func sameHostSameHeaders(handler http.Handler) http.Handler {
 
 // Add CORS Headers
 func addCORSHeaders(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *http.Request) {
-	log.Println("[DEBUG] CORS Headers added")
+	logger.Debugf("[DEBUG] CORS Headers added")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, HEAD, OPTIONS")
 	if len(r.Header["Access-Control-Request-Headers"]) > 0 {
@@ -82,8 +81,8 @@ func addCORSHeaders(w http.ResponseWriter, r *http.Request) (http.ResponseWriter
 // Validate JWT & ACL
 func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Println("[DEBUG] CHECK:", r.URL.String(), r.Method)
-		log.Println("[DEBUG] Add CORS headers for safety reasons")
+		logger.Debugf("[DEBUG] CHECK:", r.URL.String(), r.Method)
+		logger.Debugf("[DEBUG] Add CORS headers for safety reasons")
 		w, r = addCORSHeaders(w, r)
 
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
@@ -91,26 +90,26 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 
 		for route := range proxyConfig.Collection {
 			path := strings.Replace(route, r.Method, "", -1)
-			log.Println("[DEBUG] > PATH:", path)
+			logger.Debugf("[DEBUG] > PATH:", path)
 		}
 
 		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open == true {
-			log.Println("[DEBUG] Open route:", r.URL.String())
-			log.Println("[DEBUG] - check JWT:")
-			log.Println("[DEBUG] - - tokenString", tokenString)
-			log.Println("[DEBUG] - - err", err)
-			log.Println("[DEBUG] - - authHeader", authHeader)
+			logger.Debugf("[DEBUG] Open route:", r.URL.String())
+			logger.Debugf("[DEBUG] - check JWT:")
+			logger.Debugf("[DEBUG] - - tokenString", tokenString)
+			logger.Debugf("[DEBUG] - - err", err)
+			logger.Debugf("[DEBUG] - - authHeader", authHeader)
 			if err == nil && len(authHeader) == 2 && len(authHeader[1]) > 15 {
-				log.Println("[DEBUG] <-- found JWT, check validity")
+				logger.Debugf("[DEBUG] <-- found JWT, check validity")
 			} else {
-				log.Println("[DEBUG] <-- no JWT stop JWT checking")
+				logger.Debugf("[DEBUG] <-- no JWT stop JWT checking")
 				handler.ServeHTTP(w, r)
 				return
 			}
 		}
 
 		if err != nil || len(authHeader) <= 1 {
-			log.Printf("[INFO] ACCESS DENIED: No Authorization Bearer, %v\n", err)
+			logger.Infof("[INFO] ACCESS DENIED: No Authorization Bearer, %v\n", err)
 			w.WriteHeader(401)
 			return
 		}
@@ -122,7 +121,7 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
 		if err != nil {
-			log.Printf("[INFO] ACCESS DENIED: Error %v\n", err)
+			logger.Infof("[INFO] ACCESS DENIED: Error %v\n", err)
 			w.WriteHeader(401)
 		} else {
 
@@ -149,23 +148,23 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 				}
 
 				if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims) <= 0 {
-					log.Println("[INFO] ALLOW access, no claims and allow route == open")
+					logger.Infof("[INFO] ALLOW access, no claims and allow route == open")
 					found = true
 				}
 
 				if found == false {
-					log.Printf("[INFO] ACCESS DENIED: Error: No matching K/V in claims\n%s\n", potentialErrorMsg)
+					logger.Infof("[INFO] ACCESS DENIED: Error: No matching K/V in claims\n%s\n", potentialErrorMsg)
 					w.WriteHeader(401)
 					return
 				}
 			}
 
 			for h, m := range a {
-				log.Printf("[DEBUG] set %s%v: %v", proxyConfig.Connect.HeaderPrefix, h, m)
+				logger.Debugf("[DEBUG] set %s%v: %v", proxyConfig.Connect.HeaderPrefix, h, m)
 				r.Header.Set(proxyConfig.Connect.HeaderPrefix+h, fmt.Sprintf("%v", m))
 			}
 
-			log.Println("[INFO] ALLOWED")
+			logger.Infof("[INFO] ALLOWED")
 			handler.ServeHTTP(w, r)
 		}
 	})
@@ -173,44 +172,29 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 
 // Build all HTTP Methods
 func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string, proxyConfig Proxy) {
-	log.Println("[DEBUG] LINK:", m, url)
+	logger.Debugf("[DEBUG] LINK:", m, url)
+	httpHandlerFunc := func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		proxyConfig.Collection[m+r.URL.String()] = ac
+		r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
+		handler.ServeHTTP(w, r)
+	}
 	switch m {
 	case "GET":
-		router.GET(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
-			handler.ServeHTTP(w, r)
-		})
+		router.GET(ac.Route, httpHandlerFunc)
 	case "POST":
-		router.POST(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
-			handler.ServeHTTP(w, r)
-		})
+		router.POST(ac.Route, httpHandlerFunc)
 	case "PUT":
-		router.PUT(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
-			handler.ServeHTTP(w, r)
-		})
+		router.PUT(ac.Route, httpHandlerFunc)
 	case "DELETE":
-		router.DELETE(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
-			handler.ServeHTTP(w, r)
-		})
+		router.DELETE(ac.Route, httpHandlerFunc)
 	case "HEAD":
-		router.HEAD(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			proxyConfig.Collection[m+r.URL.String()] = ac
-			r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
-			handler.ServeHTTP(w, r)
-		})
+		router.HEAD(ac.Route, httpHandlerFunc)
 	}
 	// always OPTIONS
 	if h, _, _ := router.Lookup("OPTIONS", ac.Route); h == nil {
-		log.Println("[DEBUG] LINK: OPTIONS", url)
+		logger.Debugf("[DEBUG] LINK: OPTIONS", url)
 		router.OPTIONS(ac.Route, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			log.Println("[DEBUG] set cors", r.URL)
+			logger.Debugf("[DEBUG] set cors", r.URL)
 			w, r = addCORSHeaders(w, r)
 			w.Write([]byte(""))
 			return
@@ -256,7 +240,7 @@ func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
 func NewReverser(host string, port string, proxyConf Proxy) *Reverser {
 	rpURL, err := url.Parse(host + port)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatalf("%+v\n", err)
 	}
 	// initialize our reverse proxy
 	reverseProxy := NewSingleHostReverseProxy(rpURL)

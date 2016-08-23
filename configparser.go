@@ -1,9 +1,6 @@
 package main
 
-import (
-	"encoding/json"
-	"log"
-)
+import "encoding/json"
 
 // ParseConfig multiple config strings into a JWT config with multiple
 // proxies.
@@ -16,7 +13,7 @@ func ParseConfig(configStrings [][]byte) *JWTConfig {
 		var proxyConfig Proxy
 		err := json.Unmarshal(config, &proxyConfig)
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatalf("%+v\n", err)
 		}
 
 		jwtConfig.Proxies = append(jwtConfig.Proxies, proxyConfig)
