@@ -3,6 +3,11 @@ JWT (token validator & ACL) PROXY
 
 A very simpel JWT token validator and ACL proxy.
 
+#Installation on OS X
+
+- Install go: `brew install go`
+- GOPATH=$HOME/go make
+
 #Example use
 
 ```
@@ -17,3 +22,4 @@ JWT_SECRET=<secret> jwtproxy -config=./config.json
 #License
 
 MIT
+
