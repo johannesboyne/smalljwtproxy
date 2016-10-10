@@ -1,0 +1,25 @@
+{
+  "connect": {
+    "from": "0.0.0.0:4002",
+    "to": "0.0.0.0:3002",
+    "header-prefix": "X-TEST-Session-"
+  },
+  "routes": [
+    {
+      "route": "/upload",
+      "allow": {
+        "method": ["GET"],
+        "open": true,
+        "claims": []
+      }
+    },
+    {
+      "route": "/denied",
+      "allow": {
+        "method": ["GET"],
+        "open": false,
+        "claims": [{"key": "foo", "value": ["bar"]}]
+      }
+    }
+  ]
+}

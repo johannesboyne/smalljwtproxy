@@ -47,9 +47,10 @@ type claim struct {
 
 // AccessDefinition access definitions
 type AccessDefinition struct {
-	Method []string `json:"method"`
-	Open   bool     `json:"open"`
-	Claims []claim  `json:"claims"`
+	Method       []string `json:"method"`
+	Open         bool     `json:"open"`
+	Claims       []claim  `json:"claims"`
+	Cachecontrol string   `json:"cachecontrol"`
 }
 
 // Apply host and header values
@@ -78,12 +79,22 @@ func addCORSHeaders(w http.ResponseWriter, r *http.Request) (http.ResponseWriter
 	return w, r
 }
 
+// Add Caching Headers
+func addCachingHeaders(w http.ResponseWriter, r *http.Request, proxyConfig Proxy) (http.ResponseWriter, *http.Request) {
+	if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Cachecontrol) > 0 {
+		w.Header().Set("Cache-Control", proxyConfig.Collection[r.Method+r.URL.String()].Allow.Cachecontrol)
+	}
+
+	return w, r
+}
+
 // Validate JWT & ACL
 func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("[DEBUG] CHECK:", r.URL.String(), r.Method)
 		logger.Debugf("[DEBUG] Add CORS headers for safety reasons")
 		w, r = addCORSHeaders(w, r)
+		w, r = addCachingHeaders(w, r, proxyConfig)
 
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
