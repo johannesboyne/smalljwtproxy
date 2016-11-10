@@ -90,16 +90,26 @@ func addCachingHeaders(w http.ResponseWriter, r *http.Request, proxyConfig *Prox
 
 func easyJWT(handler http.Handler, routeConfig AccessControl, headerPrefix string) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		if routeConfig.Allow.Open == true {
-			handler.ServeHTTP(w, r)
-			return
-		}
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
-		if err != nil {
+		authHeader := strings.Split(tokenString, "Bearer ")
+		open := routeConfig.Allow.Open
+
+		if open == true {
+			if err == nil && len(authHeader) == 2 && len(authHeader[1]) > 15 {
+				logger.Debugf("[DEBUG] <-- found JWT, check validity")
+			} else {
+				logger.Debugf("[DEBUG] <-- no JWT stop JWT checking")
+				handler.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		if err != nil || len(authHeader) <= 1 {
+			logger.Infof("[INFO] ACCESS DENIED: No Authorization Bearer, %v\n", err)
 			w.WriteHeader(401)
 			return
 		}
-		authHeader := strings.Split(tokenString, "Bearer ")
+
 		tokenString = authHeader[1]
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -133,7 +143,7 @@ func easyJWT(handler http.Handler, routeConfig AccessControl, headerPrefix strin
 					}
 				}
 			}
-			if found == false {
+			if found == false && open != true {
 				logger.Infof("[INFO] ACCESS DENIED: Error: No matching K/V in claims\n%s\n", potentialErrorMsg)
 				w.WriteHeader(401)
 				return
