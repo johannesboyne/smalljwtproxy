@@ -80,7 +80,7 @@ func addCORSHeaders(w http.ResponseWriter, r *http.Request) (http.ResponseWriter
 }
 
 // Add Caching Headers
-func addCachingHeaders(w http.ResponseWriter, r *http.Request, proxyConfig Proxy) (http.ResponseWriter, *http.Request) {
+func addCachingHeaders(w http.ResponseWriter, r *http.Request, proxyConfig *Proxy) (http.ResponseWriter, *http.Request) {
 	if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Cachecontrol) > 0 {
 		w.Header().Set("Cache-Control", proxyConfig.Collection[r.Method+r.URL.String()].Allow.Cachecontrol)
 	}
@@ -88,42 +88,18 @@ func addCachingHeaders(w http.ResponseWriter, r *http.Request, proxyConfig Proxy
 	return w, r
 }
 
-// Validate JWT & ACL
-func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Debugf("[DEBUG] CHECK:", r.URL.String(), r.Method)
-		logger.Debugf("[DEBUG] Add CORS headers for safety reasons")
-		w, r = addCORSHeaders(w, r)
-		w, r = addCachingHeaders(w, r, proxyConfig)
-
+func easyJWT(handler http.Handler, routeConfig AccessControl, headerPrefix string) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		if routeConfig.Allow.Open == true {
+			handler.ServeHTTP(w, r)
+			return
+		}
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
-		authHeader := strings.Split(tokenString, "Bearer ")
-
-		for route := range proxyConfig.Collection {
-			path := strings.Replace(route, r.Method, "", -1)
-			logger.Debugf("[DEBUG] > PATH:", path)
-		}
-
-		if proxyConfig.Collection[r.Method+r.URL.String()].Allow.Open == true {
-			logger.Debugf("[DEBUG] Open route:", r.URL.String())
-			logger.Debugf("[DEBUG] - check JWT:")
-			logger.Debugf("[DEBUG] - - tokenString", tokenString)
-			logger.Debugf("[DEBUG] - - err", err)
-			logger.Debugf("[DEBUG] - - authHeader", authHeader)
-			if err == nil && len(authHeader) == 2 && len(authHeader[1]) > 15 {
-				logger.Debugf("[DEBUG] <-- found JWT, check validity")
-			} else {
-				logger.Debugf("[DEBUG] <-- no JWT stop JWT checking")
-				handler.ServeHTTP(w, r)
-				return
-			}
-		}
-
-		if err != nil || len(authHeader) <= 1 {
-			logger.Infof("[INFO] ACCESS DENIED: No Authorization Bearer, %v\n", err)
+		if err != nil {
 			w.WriteHeader(401)
 			return
 		}
+		authHeader := strings.Split(tokenString, "Bearer ")
 		tokenString = authHeader[1]
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -135,71 +111,52 @@ func validateJWT(handler http.Handler, proxyConfig Proxy) http.Handler {
 			logger.Infof("[INFO] ACCESS DENIED: Error %v\n", err)
 			w.WriteHeader(401)
 		} else {
-
 			v := reflect.ValueOf(token.Claims)
 			i := v.Interface()
 			a := i.(jwt.MapClaims)
-
-			if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Method) > 0 {
-				found := false
-				potentialErrorMsg := ""
-
-				for _, claim := range proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims {
-					for h, m := range a {
-						potentialErrorMsg += fmt.Sprintf("[%v]%v\n", h, m)
-						if claim.Key == h {
-							for _, v := range claim.Value {
-								potentialErrorMsg += fmt.Sprintf("\t check: %v\n", v)
-								if m == v {
-									found = true
-								}
+			for h, m := range a {
+				logger.Debugf("[DEBUG] set %s%v: %v", headerPrefix, h, m)
+				r.Header.Set(headerPrefix+h, fmt.Sprintf("%v", m))
+			}
+			found := false
+			potentialErrorMsg := ""
+			for _, claim := range routeConfig.Allow.Claims {
+				for h, m := range a {
+					potentialErrorMsg += fmt.Sprintf("[%v]%v\n", h, m)
+					if claim.Key == h {
+						for _, v := range claim.Value {
+							potentialErrorMsg += fmt.Sprintf("\t check: %v\n", v)
+							if m == v {
+								found = true
 							}
 						}
 					}
 				}
-
-				if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Claims) <= 0 {
-					logger.Infof("[INFO] ALLOW access, no claims and allow route == open")
-					found = true
-				}
-
-				if found == false {
-					logger.Infof("[INFO] ACCESS DENIED: Error: No matching K/V in claims\n%s\n", potentialErrorMsg)
-					w.WriteHeader(401)
-					return
-				}
 			}
-
-			for h, m := range a {
-				logger.Debugf("[DEBUG] set %s%v: %v", proxyConfig.Connect.HeaderPrefix, h, m)
-				r.Header.Set(proxyConfig.Connect.HeaderPrefix+h, fmt.Sprintf("%v", m))
+			if found == false {
+				logger.Infof("[INFO] ACCESS DENIED: Error: No matching K/V in claims\n%s\n", potentialErrorMsg)
+				w.WriteHeader(401)
+				return
 			}
-
-			logger.Infof("[INFO] ALLOWED")
-			handler.ServeHTTP(w, r)
 		}
-	})
+		handler.ServeHTTP(w, r)
+	}
 }
 
 // Build all HTTP Methods
-func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string, proxyConfig Proxy) {
+func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router *httprouter.Router, status string, url string, proxyConfig *Proxy) {
 	logger.Debugf("[DEBUG] LINK:", m, url)
-	httpHandlerFunc := func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		proxyConfig.Collection[m+r.URL.String()] = ac
-		r.Header.Set(proxyConfig.Connect.HeaderPrefix+"Anonymous", status)
-		handler.ServeHTTP(w, r)
-	}
 	switch m {
 	case "GET":
-		router.GET(ac.Route, httpHandlerFunc)
+		router.GET(ac.Route, easyJWT(handler, ac, proxyConfig.Connect.HeaderPrefix))
 	case "POST":
-		router.POST(ac.Route, httpHandlerFunc)
+		router.POST(ac.Route, easyJWT(handler, ac, proxyConfig.Connect.HeaderPrefix))
 	case "PUT":
-		router.PUT(ac.Route, httpHandlerFunc)
+		router.PUT(ac.Route, easyJWT(handler, ac, proxyConfig.Connect.HeaderPrefix))
 	case "DELETE":
-		router.DELETE(ac.Route, httpHandlerFunc)
+		router.DELETE(ac.Route, easyJWT(handler, ac, proxyConfig.Connect.HeaderPrefix))
 	case "HEAD":
-		router.HEAD(ac.Route, httpHandlerFunc)
+		router.HEAD(ac.Route, easyJWT(handler, ac, proxyConfig.Connect.HeaderPrefix))
 	}
 	// always OPTIONS
 	if h, _, _ := router.Lookup("OPTIONS", ac.Route); h == nil {
@@ -215,7 +172,7 @@ func httpMethodBuilder(m string, ac AccessControl, handler http.Handler, router 
 }
 
 // Map routes and methods
-func mapper(handler http.Handler, url url.URL, proxyConfig Proxy) *httprouter.Router {
+func mapper(handler http.Handler, url url.URL, proxyConfig *Proxy) *httprouter.Router {
 	router := httprouter.New()
 	if proxyConfig.Connect.To == url.Host {
 		for _, r := range proxyConfig.Routes {
@@ -237,7 +194,6 @@ func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.Host = ""
-		// --
 		if targetQuery == "" || req.URL.RawQuery == "" {
 			req.URL.RawQuery = targetQuery + req.URL.RawQuery
 		} else {
@@ -248,7 +204,7 @@ func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
 }
 
 // NewReverser creates a new reverser type
-func NewReverser(host string, port string, proxyConf Proxy) *Reverser {
+func NewReverser(host string, port string, proxyConf *Proxy) *Reverser {
 	rpURL, err := url.Parse(host + port)
 	if err != nil {
 		logger.Fatalf("%+v\n", err)
@@ -256,7 +212,7 @@ func NewReverser(host string, port string, proxyConf Proxy) *Reverser {
 	// initialize our reverse proxy
 	reverseProxy := NewSingleHostReverseProxy(rpURL)
 	// wrap that proxy with our sameHostSameHeaders function
-	singleHosted := mapper(validateJWT(sameHostSameHeaders(reverseProxy), proxyConf), *rpURL, proxyConf)
+	singleHosted := mapper(reverseProxy, *rpURL, proxyConf)
 	rev := Reverser{reverseProxy, singleHosted}
 	return &rev
 }

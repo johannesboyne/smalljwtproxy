@@ -52,7 +52,7 @@ func main() {
 
 	if len(proxyConfig.Proxies) >= 1 {
 		for _, pc := range proxyConfig.Proxies[1:len(proxyConfig.Proxies)] {
-			go func(proxy Proxy) {
+			go func(proxy *Proxy) {
 				logger.Debugf("[DEBUG] start proxy...")
 				proxy.Collection = make(map[string]AccessControl)
 
@@ -61,7 +61,7 @@ func main() {
 				rev := NewReverser("http://"+to[0]+":", to[1], proxy)
 				logger.Debugf("[DEBUG] %s %v\n", initLog, from[1])
 				logger.Fatalf("%+v\n", http.ListenAndServe(":"+from[1], rev.Host))
-			}(pc)
+			}(&pc)
 		}
 	}
 
@@ -70,7 +70,7 @@ func main() {
 
 	to := strings.Split(proxy.Connect.To, ":")
 	from := strings.Split(proxy.Connect.From, ":")
-	rev := NewReverser("http://"+to[0]+":", to[1], proxy)
+	rev := NewReverser("http://"+to[0]+":", to[1], &proxy)
 	logger.Debugf("[DEBUG] %s %v\n", initLog, from[1])
 	logger.Fatalf("%+v\n", http.ListenAndServe(":"+from[1], rev.Host))
 }
