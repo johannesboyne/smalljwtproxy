@@ -80,9 +80,9 @@ func addCORSHeaders(w http.ResponseWriter, r *http.Request) (http.ResponseWriter
 }
 
 // Add Caching Headers
-func addCachingHeaders(w http.ResponseWriter, r *http.Request, proxyConfig *Proxy) (http.ResponseWriter, *http.Request) {
-	if len(proxyConfig.Collection[r.Method+r.URL.String()].Allow.Cachecontrol) > 0 {
-		w.Header().Set("Cache-Control", proxyConfig.Collection[r.Method+r.URL.String()].Allow.Cachecontrol)
+func addCachingHeaders(w http.ResponseWriter, r *http.Request, routeConfig AccessControl) (http.ResponseWriter, *http.Request) {
+	if len(routeConfig.Allow.Cachecontrol) > 0 {
+		w.Header().Set("Cache-Control", routeConfig.Allow.Cachecontrol)
 	}
 
 	return w, r
@@ -90,6 +90,9 @@ func addCachingHeaders(w http.ResponseWriter, r *http.Request, proxyConfig *Prox
 
 func easyJWT(handler http.Handler, routeConfig AccessControl, headerPrefix string) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		w, r = addCachingHeaders(w, r, routeConfig)
+		w, r = addCORSHeaders(w, r)
+
 		tokenString, err := jwtr.HeaderExtractor{"Authorization"}.ExtractToken(r)
 		authHeader := strings.Split(tokenString, "Bearer ")
 		open := routeConfig.Allow.Open
